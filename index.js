@@ -36,6 +36,14 @@ fs.stat("./config.json", (error) => {
           required: true,
           hidden: true,
         },
+        port: {
+          required: true,
+          hidden: true,
+        },
+        directory: {
+          required: true,
+          hidden: true,
+        },
       },
     };
 
@@ -53,22 +61,16 @@ fs.stat("./config.json", (error) => {
           console.log("Authenticated successfully!");
           console.log("Generating configuration...");
           config.user_id = response.data.user._id;
-
-          var timestamp = ((new Date().getTime() / 1000) | 0).toString(16);
-          config.instance_id =
-            timestamp +
-            "xxxxxxxxxxxxxxxx"
-              .replace(/[x]/g, function () {
-                return ((Math.random() * 16) | 0).toString(16);
-              })
-              .toLowerCase();
+          config.port = result.port;
+          config.directory = result.directory;
 
           fs.writeFileSync(
             "./config.json",
             JSON.stringify({
               jwt: response.data.jwt,
-              instance_id: config.instance_id,
               name: result["server name"],
+              port: config.port,
+              directory: config.directory,
             })
           );
 
@@ -80,8 +82,8 @@ fs.stat("./config.json", (error) => {
               `https://www.theparadigmdev.com/api/drawer/${config.user_id}/pds`,
               {
                 ip: await publicIp.v4(),
-                instance_id: config.instance_id,
                 name: result["server name"],
+                port: config.port,
               }
             )
             .then((response) => {
@@ -105,9 +107,12 @@ fs.stat("./config.json", (error) => {
       })
       .then((response) => {
         console.log("Server reinstantiated successfully!");
-        console.log("Listening on port 54387...");
+        console.log(
+          `Serving directory ${config.directory} on port ${config.port}...`
+        );
       });
   }
+  app.listen(config.port);
 });
 
 const app = express();
@@ -117,12 +122,15 @@ app.use(express.json());
 app.use(cors());
 
 function files(path) {
-  const dir = fs.readdirSync(path, { withFileTypes: true });
+  const dir = fs.readdirSync(`${config.directory}${path}`, {
+    withFileTypes: true,
+  });
 
   let stats = [];
   dir.forEach(async (item) => {
     if (item.name[0] != ".") {
-      let stat = fs.statSync(`${decodeURIComponent(path)}/${item.name}`);
+      console.log(`${config.directory}${path}/${item.name}`);
+      let stat = fs.statSync(`${config.directory}${path}/${item.name}`);
 
       stats.push({
         name: item.name,
@@ -130,12 +138,9 @@ function files(path) {
         modified: moment(stat.mtime).format("M/D/YYYY [at] h:mm"),
         dir: stat.isDirectory(),
         type:
-          mime.lookup(`${decodeURIComponent(path)}/${item.name}`) ||
+          mime.lookup(`${path}/${item.name}`) ||
           _path.extname(item.name) + " file",
-        path:
-          decodeURIComponent(path) != "/"
-            ? `/${item.name}`
-            : `${decodeURIComponent(path)}/${item.name}`,
+        path: `${config.directory}${path}/${item.name}`,
       });
     }
   });
@@ -152,17 +157,17 @@ app.get("/api/:path", (req, res) => {
     res.json({ files: files("/") });
   } else {
     res.json({
-      files: files(
-        dir +
-          "/" +
-          decodeURIComponent(req.params.path).substring(dir.length + 1)
-      ),
+      files: files(decodeURIComponent(req.params.path)),
     });
   }
 });
 
 app.get("/api/download/:path", async (req, res) => {
-  res.download(decodeURIComponent(req.params.path));
+  res.download(config.directory + decodeURIComponent(req.params.path));
+});
+
+app.get("/api/get/:path", async (req, res) => {
+  res.sendFile(config.directory + decodeURIComponent(req.params.path));
 });
 
 app.post("/api/:path", async (req, res) => {
@@ -232,5 +237,3 @@ app.put("/api/:path", (req, res) => {
     res.json({ files: files(path) });
   }
 });
-
-app.listen(54387);
